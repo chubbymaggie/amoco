@@ -169,7 +169,7 @@ def sparc_jmpl(obj,rd,rs1,i,rs2,simm13):
     obj.type = type_control_flow
 
 @ispec("32[ 10 ----- 111001 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="rett")
-def sparc_rett(obj,rd,rs1,i,rs2,simm13):
+def sparc_rett(obj,rs1,i,rs2,simm13):
     src1 = env.r[rs1]
     src2 = env.r[rs2] if i==0 else env.cst(simm13,13).signextend(32)
     adr  = src1+src2
@@ -181,7 +181,7 @@ def sparc_Ticc(obj,rs1,i,rs2,imm7):
     src1 = env.r[rs1]
     src2 = env.r[rs2] if i==0 else env.cst(imm7,7).signextend(32)
     obj.src  = (src1+src2)[0:7]
-    obj.operands = [src]
+    obj.operands = [obj.src]
     obj.type = type_control_flow
 
 @ispec("32[ 10 rd(5) 101000 rs1(5) - ------------- ]", mnemonic="rd", _src=env.y)
@@ -198,10 +198,10 @@ def sparc_rd_(obj,rd,rs1,_src):
     obj.operands = [_src,dst]
     obj.type = type_other
 
-@ispec("32[ 10 rd(5) 101000 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wt", _dst=env.y)
-@ispec("32[ 10 rd(5) 101001 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wt", _dst=env.psr)
-@ispec("32[ 10 rd(5) 101010 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wt", _dst=env.wim)
-@ispec("32[ 10 rd(5) 101011 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wt", _dst=env.tbr)
+@ispec("32[ 10 rd(5) 101000 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wr", _dst=env.y)
+@ispec("32[ 10 rd(5) 101001 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wr", _dst=env.psr)
+@ispec("32[ 10 rd(5) 101010 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wr", _dst=env.wim)
+@ispec("32[ 10 rd(5) 101011 rs1(5) i -------- rs2(5) =simm13(13) ]", mnemonic="wr", _dst=env.tbr)
 def sparc_wr_(obj,rd,rs1,i,rs2,simm13,_dst):
     if _dst==env.y:
         if rs1!=0:
