@@ -116,7 +116,7 @@ class disassembler(object):
     # specmodules: list of python modules containing ispec decorated funcs
     # iset: lambda used to select module (ispec list)
     # endian: instruction fetch endianess (1: little, -1: big)
-    def __init__(self,specmodules,iset=lambda:0,endian=lambda:1):
+    def __init__(self,specmodules,iset=(lambda *args,**kargs:0),endian=(lambda *args, **kargs:1)):
         self.maxlen = max((s.mask.size/8 for s in sum((m.ISPECS for m in specmodules),[])))
         self.iset = iset
         self.endian = endian
@@ -160,7 +160,7 @@ class disassembler(object):
             if f==0: # we are on a leaf...
                 for s in l: # lets search linearly over this branch
                     try:
-                        i = s.decode(bytestring,e,i=self.__i)
+                        i = s.decode(bytestring,e,i=self.__i,ival=b.ival)
                     except (DecodeError,InstructionError):
                         logger.debug('exception raised by disassembler:'
                                      'decoding %s with spec %s'%(bytestring,s.format))
@@ -169,6 +169,8 @@ class disassembler(object):
                         if self.__i is None: self.__i = i
                         return self(bytestring[s.mask.size/8:],**kargs)
                     self.__i = None
+                    if 'address' in kargs:
+                        i.address = kargs['address']
                     return i
                 break
             else: # go deeper in the tree according to submask value of b
@@ -286,7 +288,7 @@ class ispec(object):
         go = +1
         chklen = True
         if direction=='<': # format goes from high bits to low bits
-            fmt = reversed(fmt)
+            fmt = list(reversed(fmt))
             go = -1
         if size == '*':
             self.size = 0
@@ -358,14 +360,14 @@ class ispec(object):
         return ast
 
     # decode always receive input bytes in ascending memory order
-    # istr 
-    def decode(self,istr,endian=1,i=None):
+    def decode(self,istr,endian=1,i=None,ival=None):
         # check spec :
         blen = self.fix.size/8
         if len(istr)<blen: raise DecodeError
         bs = istr[0:blen]
         # Bits object created with LSB to MSB byte string:
-        b = Bits(bs[::endian],self.fix.size,bitorder=1)
+        if ival is None: ival = bs[::endian]
+        b = Bits(ival,self.fix.size,bitorder=1)
         if b&self.mask != self.fix: raise DecodeError
         if self.size==0: # variable length spec:
             if endian!=1: logger.error("invalid endianess")

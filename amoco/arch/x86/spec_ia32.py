@@ -290,11 +290,15 @@ def ia32_imm_rel(obj,cc,cb):
     obj.operands = [env.cst(cb,8).signextend(32)]
     obj.type = type_control_flow
 
-@ispec_ia32("*>[ {0f} cc(4) 0001 rel(*) ]", mnemonic = "Jcc") # 0f 8x cw/d
-def ia32_imm_rel(obj,cc,rel):
+@ispec_ia32("*>[ {0f} cc(4) 0001 ~data(*) ]", mnemonic = "Jcc") # 0f 8x cw/d
+def ia32_imm_rel(obj,cc,data):
     obj.cond = CONDITION_CODES[cc]
     size = obj.misc['opdsz'] or 32
-    obj.operands = [env.cst(rel,size)]
+    imm = data[0:size]
+    op1 = env.cst(imm.int(-1),size)
+    op1.sf = True
+    obj.operands = [op1]
+    obj.bytes += pack(imm)
     obj.type = type_control_flow
 
 # 2 operands
@@ -635,15 +639,15 @@ def ia32_reg_32_inv(obj,Mod,RM,REG,data):
         raise InstructionError(obj)
 
 # r16/32 , m16:16/32
-@ispec_ia32("*>[ {c5} /r     ]", mnemonic = "LDS")
-@ispec_ia32("*>[ {0f}{b2} /r ]", mnemonic = "LSS")
-@ispec_ia32("*>[ {c4} /r     ]", mnemonic = "LES")
-@ispec_ia32("*>[ {0f}{b4} /r ]", mnemonic = "LFS")
-@ispec_ia32("*>[ {0f}{b5} /r ]", mnemonic = "LGS")
-def ia32_r32_seg(obj,Mod,RM,REG,data):
+@ispec_ia32("*>[ {c5} /r     ]", mnemonic = "LDS", _seg=env.ds)
+@ispec_ia32("*>[ {0f}{b2} /r ]", mnemonic = "LSS", _seg=env.ss)
+@ispec_ia32("*>[ {c4} /r     ]", mnemonic = "LES", _seg=env.es)
+@ispec_ia32("*>[ {0f}{b4} /r ]", mnemonic = "LFS", _seg=env.fs)
+@ispec_ia32("*>[ {0f}{b5} /r ]", mnemonic = "LGS", _seg=env.gs)
+def ia32_r32_seg(obj,Mod,RM,REG,data,_seg):
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = env.getreg(REG,op2.size)
-    op2.size += 16
+    op2 = env.mem(op2,op1.size+16,_seg)
     obj.operands = [op1, op2]
     obj.type = type_system
 
@@ -652,7 +656,7 @@ def ia32_r32_seg(obj,Mod,RM,REG,data):
 def ia32_r32_bound(obj,Mod,RM,REG,data):
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = env.getreg(REG,op2.size)
-    op2.size *=2
+    op2 = env.mem(op2,op1.size*2)
     obj.operands = [op1, op2]
     obj.type = type_data_processing
 
@@ -775,16 +779,13 @@ def ia32_in_out(obj,ib):
     obj.operands = [r,x] if obj.mnemonic=='IN' else [x,r]
     obj.type = type_system
 
-@ispec_ia32("*>[ {e5} ~data(*) ]", mnemonic = "IN")
-@ispec_ia32("*>[ {e7} ~data(*) ]", mnemonic = "OUT")
-def ia32_ADC_eax_imm(obj,data):
+@ispec_ia32("16>[ {e5} ib(8) ]", mnemonic = "IN")
+@ispec_ia32("16>[ {e7} ib(8) ]", mnemonic = "OUT")
+def ia32_ADC_eax_imm(obj,ib):
     size = obj.misc['opdsz'] or 32
-    if data.size<size: raise InstructionError(obj)
-    imm = data[0:size]
     r = env.eax if size==32 else env.ax
-    x = env.cst(imm.int(),size)
+    x = env.cst(ib,8)
     obj.operands = [r,x] if obj.mnemonic=='IN' else [x,r]
-    obj.bytes += pack(imm)
     obj.type = type_system
 
 @ispec_ia32("*>[ {0f}{b6} /r ]", mnemonic = "MOVZX", _flg8=True)

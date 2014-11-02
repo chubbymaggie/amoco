@@ -18,7 +18,7 @@ class PEError(Exception):
 ##
 
 class PEcore(object):
-    order = '@' #native order
+    order = '<' #le
     pfx = ''
     def __init__(self,data,offset=0):
         self.set(data[offset:offset+len(self)])
@@ -42,7 +42,7 @@ IMAGE_OS2_SIGNATURE_LE=0x454C
 IMAGE_VXD_SIGNATURE=0x454C
 
 class DOSHdr(PEcore):
-    fmt = 'H58xl'
+    fmt = 'H58xI'
     keys = ('e_magic', 'e_lfanew')
     def __init__(self,data,offset=0):
         if data[offset:offset+2]!='MZ': raise PEError('no DOS Header found')
@@ -251,7 +251,10 @@ class SectionHdr(PEcore):
             'Characteristics')
     def __init__(self,data,offset=0):
         PEcore.__init__(self,data,offset)
-        self.Name = self.Name.decode('utf-8').strip('\0')
+        try:
+            self.Name = self.Name.decode('utf-8').strip('\0')
+        except UnicodeDecodeError:
+            logger.info('SectionHdr: Name string decode error %s'%repr(self.Name))
 
     def group(self):
         return self.Name.partition('$')
@@ -339,7 +342,11 @@ class StdSymbolRecord(PEcore):
             index = struct.unpack('I',self._Name[4:8])[0]
             return index
         else:
-            return self._Name.decode('utf-8').strip('\0')
+            try:
+                return self._Name.decode('utf-8').strip('\0')
+            except UnicodeDecodeError:
+                logger.info('StdSymbolHdr: Name decode error %s'%repr(self._Name))
+                return self._Name
 
     def typename(self):
         try:
@@ -608,10 +615,10 @@ class PE(PEcore):
         if S and not S.Characteristics==IMAGE_SCN_LNK_REMOVE:
             addr = self.basemap+S.RVA
             if addr%self.Opt.SectionAlignment:
-                logger.warning('bad alignment for section %s'%S.name)
+                logger.warning('bad alignment for section %s'%S.Name)
             sta = S.PointerToRawData
             if sta%self.Opt.FileAlignment:
-                logger.warning('bad file alignment for section %s'%S.name)
+                logger.warning('bad file alignment for section %s'%S.Name)
             sto = sta+S.SizeOfRawData
             bytes = self.data[sta:sto].ljust(S.VirtualSize)
             if pagesize:
@@ -642,38 +649,52 @@ class PE(PEcore):
             data = data[:imports.Size]
             self.ImportTable = ImportTable(data)
             for e in self.ImportTable.dlls:
-                dllname = self.getdata(e.NameRVA)
-                e.Name = dllname.partition('\0')[0]
-                data = self.getdata(e.ImportLookupTableRVA)
-                e.ImportLookupTable = ImportLookupTable(data,self.Opt.Magic)
-                e.ImportAddressTable = []
-                vaddr = e.ImportAddressTableRVA + self.basemap
-                for x in e.ImportLookupTable.imports:
-                    if x[0]==0:
-                        ref = NameTableEntry(self.getdata(x[1]))
+                try:
+                    dllname = self.getdata(e.NameRVA)
+                    e.Name = dllname.partition('\0')[0]
+                except ValueError:
+                    logger.warning('invalid dll name RVA in ImportTable')
+                try:
+                    if e.ImportLookupTableRVA != 0:
+                        data = self.getdata(e.ImportLookupTableRVA)
                     else:
-                        ref = '#%s'%str(x[1]) #ordinal case
-                    e.ImportAddressTable.append((vaddr,ref))
-                    vaddr += e.ImportLookupTable.elsize
-                D.update(e.ImportAddressTable)
-                for vaddr,ref in e.ImportAddressTable:
-                    if isinstance(ref,str): symbol=ref
-                    else: symbol = ref.symbol
-                    D[vaddr] = "%s::%s"%(e.Name,symbol)
+                        data = self.getdata(e.ImportAddressTableRVA)
+                except ValueError:
+                    logger.warning('invalid ImportLookupTable RVA')
+                else:
+                    e.ImportLookupTable = ImportLookupTable(data,self.Opt.Magic)
+                    e.ImportAddressTable = []
+                    vaddr = e.ImportAddressTableRVA + self.basemap
+                    for x in e.ImportLookupTable.imports:
+                        if x[0]==0:
+                            ref = NameTableEntry(self.getdata(x[1]))
+                        else:
+                            ref = '#%s'%str(x[1]) #ordinal case
+                        e.ImportAddressTable.append((vaddr,ref))
+                        vaddr += e.ImportLookupTable.elsize
+                    D.update(e.ImportAddressTable)
+                    for vaddr,ref in e.ImportAddressTable:
+                        if isinstance(ref,str): symbol=ref
+                        else: symbol = ref.symbol
+                        D[vaddr] = "%s::%s"%(e.Name,symbol)
         return D
 
     def __tls(self):
         tls = self.Opt.DataDirectories.get('TLSTable',None)
-        if tls is not None:
-            data = self.getdata(tls.RVA)
-            tls = TLSTable(data,self.Opt.Magic)
+        if tls is not None and tls.RVA != 0:
             try:
-                cbtable = self.getdata(tls.AddressOfCallbacks,absolute=True)
+                data = self.getdata(tls.RVA)
             except ValueError:
-                tls.callbacks = []
+                logger.warning('invalid TLS RVA')
             else:
-                tls.readcallbacks(cbtable)
-            return tls
+                tls = TLSTable(data,self.Opt.Magic)
+                try:
+                    cbtable = self.getdata(tls.AddressOfCallbacks,absolute=True)
+                except ValueError:
+                    tls.callbacks = []
+                else:
+                    tls.readcallbacks(cbtable)
+                return tls
         return None
 
     def __variables(self):
