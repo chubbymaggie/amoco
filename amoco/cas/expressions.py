@@ -518,12 +518,14 @@ class flt(exp):
 # reg holds 32-bit register reference (refname).
 #------------------------------------------------------------------------------
 class reg(exp):
-    __slots__ = ['ref','_subrefs']
+    __slots__ = ['ref','_subrefs', '__protect']
     _is_def   = True
     _is_reg   = True
 
     def __init__(self,refname,size=32):
+        self.__protect = False
         self.size = size
+        self.__protect = True
         self.sf  = False
         self.ref = refname
         self._subrefs = {}
@@ -541,6 +543,11 @@ class reg(exp):
 
     def addr(self,env):
         return self
+
+    def __setattr__(self,a,v):
+        if a is 'size' and self.__protect is True:
+            raise AttributeError,'protected attribute'
+        exp.__setattr__(self,a,v)
 ##
 
 #------------------------------------------------------------------------------
@@ -556,13 +563,13 @@ class ext(reg):
     def stub(cls,ref):
         try:
             return cls.stubs[ref]
-        except KeyError:
+        except AttributeError,KeyError:
             logger.info('no stub defined for %s'%ref)
-            return (lambda env:None)
+            return (lambda env,**kargs:None)
 
-    def call(self,env):
+    def call(self,env,**kargs):
         logger.info('stub %s called'%self.ref)
-        res = self.stub(self.ref)(env)
+        res = self.stub(self.ref)(env,**kargs)
         if res is None:
             return top(self.size)
         else:
@@ -745,7 +752,7 @@ class mem(exp):
     def __init__(self,a,size=32,seg='',disp=0):
         self.size  = size
         self.sf    = False
-        self.a  = a if isinstance(a,ptr) else ptr(a,seg,disp)
+        self.a  = ptr(a,seg,disp)
 
     def __str__(self):
         return 'M%d%s'%(self.size,self.a)
@@ -771,7 +778,10 @@ class ptr(exp):
     _is_ptr   = True
 
     def __init__(self,base,seg='',disp=0):
-        assert base._is_def
+        if base._is_ptr:
+            if seg is '': seg=base.seg
+            disp = base.disp+disp
+            base = base.base
         self.base = base
         self.disp = disp
         self.seg  = seg
@@ -810,15 +820,17 @@ def slicer(x,pos,size):
         return x
     else:
         if x._is_mem:
-            a = ptr(x.a.base,x.a.seg,x.a.disp+pos)
-            return mem(a,size)
+            off,rst = divmod(pos,8)
+            if rst==0:
+                a = ptr(x.a.base,x.a.seg,x.a.disp+off)
+                return mem(a,size)
         return slc(x,pos,size)
 
 #------------------------------------------------------------------------------
 # slc holds bit-slice of a non-cst (and non-slc) expressions 
 #------------------------------------------------------------------------------
 class slc(exp):
-    __slots__ = ['x','pos','ref']
+    __slots__ = ['x','pos','ref','__protect','_is_reg']
     _is_def   = True
     _is_slc   = True
 
@@ -828,6 +840,7 @@ class slc(exp):
             res = x[pos:pos+size]
             x,pos = res.x,res.pos
         self.x = x
+        self.__protect = False
         self.size = size
         self.sf   = False
         self.pos  = pos
@@ -835,14 +848,21 @@ class slc(exp):
 
     def setref(self,ref):
         if self.x._is_reg:
+            self._is_reg = True
             if ref is None:
                 ref = self.x._subrefs.get((self.pos,self.size),None)
             else:
                 self.x._subrefs[(self.pos,self.size)] = ref
+            self.__protect = True
         self.ref = ref
 
     def raw(self):
         return "%s[%d:%d]"%(str(self.x),self.pos,self.pos+self.size)
+
+    def __setattr__(self,a,v):
+        if a is 'size' and self.__protect is True:
+            raise AttributeError,'protected attribute'
+        exp.__setattr__(self,a,v)
 
     def __str__(self):
         return self.ref or self.raw()
@@ -856,8 +876,10 @@ class slc(exp):
     def simplify(self):
         self.x = self.x.simplify()
         if self.x._is_mem:
-            a = ptr(self.x.a.base,self.x.a.seg,self.x.a.disp+self.pos)
-            return mem(a,self.size)
+            off,rst = divmod(self.pos,8)
+            if rst==0:
+                a = ptr(self.x.a.base,self.x.a.seg,self.x.a.disp+off)
+                return mem(a,self.size)
         return self
 
     # slice of a slice: 

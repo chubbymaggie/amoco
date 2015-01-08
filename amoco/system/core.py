@@ -316,10 +316,11 @@ class CoreExec(object):
         self.cpu = cpu
         self.mmap = MemoryMap()
         self.load_binary()
-        cpu.ext.stubs = stubs
+        if cpu is not None:
+            cpu.ext.stubs = stubs
 
     def initenv(self):
-        pass
+        return None
 
     def load_binary(self):
         pass
@@ -328,6 +329,9 @@ class CoreExec(object):
         return self.mmap.read(vaddr,size)
 
     def read_instruction(self,vaddr,**kargs):
+        if self.cpu is None:
+            logger.error('no cpu imported')
+            raise ValueError
         maxlen = self.cpu.disassemble.maxlen
         try:
             istr = self.mmap.read(vaddr,maxlen)
@@ -366,17 +370,20 @@ class CoreExec(object):
 #------------------------------------------------------------------------------
 from collections import defaultdict
 
-def default_hook(m):
+# default stub:
+def default_hook(m,**kargs):
     pass
 
 stubs = defaultdict(lambda :default_hook)
 
 # decorators for ext() stub definition:
 
+# decorator to define a stub:
 def stub(f):
     stubs[f.__name__] = f
     return f
 
+# decorator to (re)define the default stub:
 def stub_default(f):
     stubs.default_factory = lambda :f
     return f
@@ -398,16 +405,16 @@ class DataIO(object):
         self.f.seek(i.start,0)
         return self.f.read(i.stop-i.start)
 
-    def read(self,size=0):
+    def read(self,size=-1):
         return self.f.read(size)
 
-    def readline(self,size=0):
+    def readline(self,size=-1):
         return self.f.readline(size)
 
-    def readlines(self,size=0):
+    def readlines(self,size=-1):
         return self.f.readlines(size)
 
-    def xreadlines(self,size=0):
+    def xreadlines(self,size=-1):
         return self.f.xreadlines(size)
 
     def write(self,s):

@@ -2,7 +2,7 @@
 # Copyright (C) 2006-2014 Axel Tillequin (bdcht3@gmail.com) 
 # published under GPLv2 license
 
-from amoco.logger import Log
+from amoco.logger import Log, set_debug,set_quiet,set_log_all
 logger = Log(__name__)
 
 from amoco import cfg
@@ -23,8 +23,11 @@ class lsweep(object):
     def sequence(self,loc=None):
         p = self.prog
         if loc is None:
-            m = p.initenv()
-            loc = m(p.PC())
+            try:
+                m = p.initenv()
+                loc = m(p.PC())
+            except (TypeError,ValueError):
+                loc = 0
         while True:
             i = p.read_instruction(loc)
             if i is None: raise StopIteration
