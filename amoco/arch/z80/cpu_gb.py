@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from amoco.arch.z80.asm import *
 # expose "microarchitecture" (instructions semantics)
 uarch = dict(filter(lambda kv:kv[0].startswith('i_'),locals().iteritems()))
@@ -14,3 +16,6 @@ instruction.set_formatter(GB_full)
 from amoco.arch.z80 import spec_gb
 
 disassemble = disassembler([spec_gb])
+
+def PC():
+    return pc

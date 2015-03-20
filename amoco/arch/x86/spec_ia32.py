@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 # This code is part of Amoco
-# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 # spec_xxx files are providers for instruction objects.
@@ -736,6 +736,14 @@ def ia32_rdrand(obj,Mod,RM,REG,data):
     if not op2._is_mem: raise InstructionError(obj)
     op1 = env.getreg(REG,op2.size)
     obj.operands = [op2,op1]
+    obj.type = type_data_processing
+
+@ispec_ia32("*>[ {0f}{c7} /1 ]", mnemonic = "CMPXCHG8B")
+def ia32_cmpxchg(obj,Mod,RM,data):
+    op2,data = getModRM(obj,Mod,RM,data)
+    if not op2._is_mem: raise InstructionError(obj)
+    op2.size = 64
+    obj.operands = [op2]
     obj.type = type_data_processing
 
 @ispec_ia32("*>[ {0f}{1f} /0  ]", mnemonic = "NOP",     type=type_cpu_state)

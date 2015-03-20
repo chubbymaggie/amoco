@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
+
 # This code is part of Amoco
-# Copyright (C) 2006-2014 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2006-2014 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 from amoco.arch.arm.v7.asm import *
@@ -22,3 +24,6 @@ mode   = (lambda : internals['isetstate'])
 endian = (lambda : 1 if internals['endianstate']==0 else -1)
 
 disassemble = disassembler([spec_armv7,spec_thumb],mode,endian)
+
+def PC():
+    return pc

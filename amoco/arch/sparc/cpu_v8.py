@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from amoco.arch.sparc.asm import *
 # expose "microarchitecture" (instructions semantics)
 uarch = dict(filter(lambda kv:kv[0].startswith('i_'),locals().iteritems()))
@@ -15,3 +17,6 @@ instruction.set_formatter(SPARC_V8_synthetic)
 from amoco.arch.sparc import spec_v8
 
 disassemble = disassembler([spec_v8],endian=lambda:-1)
+
+def PC():
+    return pc

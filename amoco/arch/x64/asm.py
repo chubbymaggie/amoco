@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 # This code is part of Amoco
-# Copyright (C) 2006-2011 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2006-2011 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 from .env import *
@@ -13,12 +13,12 @@ logger = Log(__name__)
 #------------------------------------------------------------------------------
 # utils :
 def push(fmap,x):
-  fmap[rsp] = fmap[rsp]-x.length
+  fmap[rsp] = fmap(rsp-x.length)
   fmap[mem(rsp,x.size)] = x
 
 def pop(fmap,l):
   fmap[l] = fmap(mem(rsp,l.size))
-  fmap[rsp] = fmap[rsp]+l.length
+  fmap[rsp] = fmap(rsp+l.length)
 
 def parity(x):
   x = x.zeroextend(64)
@@ -78,13 +78,13 @@ def i_RET(i,fmap):
   pop(fmap,rip)
 
 def i_HLT(i,fmap):
-  ext('halt').call(fmap)
+  fmap[rip] = top(64)
 
 #------------------------------------------------------------------------------
 def _ins_(i,fmap,l):
   counter = cx if i.misc['adrsz'] else rcx
-  loc = mem(fmap(rdi),l*8)
-  src = ext('IN%s'%fmap(dx),l*8).call(fmap)
+  loc = mem(rdi,l*8)
+  src = ext('IN',size=l*8).call(fmap,port=fmap(dx))
   if i.misc['rep']:
       fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
       fmap[counter] = fmap(counter)-1
@@ -105,13 +105,11 @@ def i_INSD(i,fmap):
 def _outs_(i,fmap,l):
   counter = cx if i.misc['adrsz'] else rcx
   src = fmap(mem(rsi,l*8))
-  loc = ext('OUT%s'%fmap(dx),l*8).call(fmap)
+  ext('OUT').call(fmap,src=fmap(mem(rsi,l*8)))
   if i.misc['rep']:
-      fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
       fmap[counter] = fmap(counter)-1
       fmap[rip] = tst(fmap(counter)==0, fmap[rip]+i.length, fmap[rip])
   else:
-      fmap[loc] = src
       fmap[rip] = fmap[rip]+i.length
   fmap[rdi] = tst(fmap(df),fmap(rdi)-l,fmap(rdi)+l)
 
@@ -124,8 +122,7 @@ def i_OUTSD(i,fmap):
 
 #------------------------------------------------------------------------------
 def i_INT3(i,fmap):
-  fmap[rip] = fmap[rip]+i.length
-  ext('INT3').call(fmap)
+  fmap[rip] = ext('INT3',size=64)
 
 def i_CLC(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -187,9 +184,9 @@ def i_POPFQ(i,fmap):
 
 #------------------------------------------------------------------------------
 def _cmps_(i,fmap,l):
-  counter,d,s = ecx,edi,esi if i.misc['adrsz'] else rcx,rdi,rsi
-  dst = mem(fmap(d),l*8)
-  src = mem(fmap(s),l*8)
+  counter,d,s = (ecx,edi,esi) if i.misc['adrsz'] else (rcx,rdi,rsi)
+  dst = fmap(mem(d,l*8))
+  src = fmap(mem(s,l*8))
   x, carry, overflow = SubWithBorrow(dst,src)
   if i.misc['rep']:
       fmap[af] = tst(fmap(counter)==0, fmap(af), halfborrow(dst,src))
@@ -208,8 +205,8 @@ def _cmps_(i,fmap,l):
       fmap[cf] = carry
       fmap[of] = overflow
       fmap[rip] = fmap[rip]+i.length
-  fmap[d] = tst(fmap(df),fmap(d)-l,fmap(d)+l)
-  fmap[s] = tst(fmap(df),fmap(s)-l,fmap(s)+l)
+  fmap[d] = fmap(tst(df,d-l,d+l))
+  fmap[s] = fmap(tst(df,s-l,s+l))
 
 def i_CMPSB(i,fmap):
   _cmps_(i,fmap,1)
@@ -223,8 +220,8 @@ def i_CMPSQ(i,fmap):
 #------------------------------------------------------------------------------
 def _scas_(i,fmap,l):
   counter,d = ecx,edi if i.misc['adrsz'] else rcx,rdi
-  a = {1:al, 2:ax, 4:eax, 8:rax}[l]
-  src = mem(fmap(d),l*8)
+  a = fmap({1:al, 2:ax, 4:eax, 8:rax}[l])
+  src = fmap(mem(d,l*8))
   x, carry, overflow = SubWithBorrow(a,src)
   if i.misc['rep']:
       fmap[af] = tst(fmap(counter)==0, fmap(af), halfborrow(a,src))
@@ -258,7 +255,7 @@ def i_SCASQ(i,fmap):
 def _lods_(i,fmap,l):
   counter,s = (ecx,esi) if i.misc['adrsz'] else (rcx,rsi)
   loc = {1:al, 2:ax, 4:eax, 8:rax}[l]
-  src = mem(fmap(s),l*8)
+  src = fmap(mem(s,l*8))
   if i.misc['rep']:
       fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
       fmap[counter] = fmap(counter)-1
@@ -266,7 +263,7 @@ def _lods_(i,fmap,l):
   else:
       fmap[loc] = src
       fmap[rip] = fmap[rip]+i.length
-  fmap[s] = tst(fmap(df),fmap(s)-l,fmap(s)+l)
+  fmap[s] = fmap(tst(df,s-l,s+l))
 
 def i_LODSB(i,fmap):
   _lods_(i,fmap,1)
@@ -283,8 +280,8 @@ def _stos_(i,fmap,l):
       counter,d = ecx,edi
   else:
       counter,d = rcx,rdi
-  src = {1:al, 2:ax, 4:eax, 8:rax}[l]
-  loc = mem(fmap(d),l*8)
+  loc = mem(d,l*8)
+  src = fmap({1:al, 2:ax, 4:eax, 8:rax}[l])
   if i.misc['rep']:
       fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
       fmap[counter] = fmap(counter)-1
@@ -309,8 +306,8 @@ def _movs_(i,fmap,l):
       counter,d,s = ecx,edi,esi
   else:
       counter,d,s = rcx,rdi,rsi
-  loc = mem(fmap(d),l*8)
-  src = mem(fmap(s),l*8)
+  loc = mem(d,l*8)
+  src = fmap(mem(s,l*8))
   if i.misc['rep']:
       fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
       fmap[counter] = fmap(counter)-1
@@ -343,14 +340,14 @@ def i_OUT(i,fmap):
   op2 = fmap(i.operands[1])
   ext('OUT%s'%op1).call(fmap,arg=op2)
 
-#op1_src retreives fmap[op1] (op1 value): 
+#op1_src retreives fmap[op1] (op1 value):
 def i_PUSH(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = fmap(i.operands[0])
   if op1.size==8: op1 = op1.signextend(64)
   push(fmap,op1)
 
-#op1_dst retreives op1 location: 
+#op1_dst retreives op1 location:
 def i_POP(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = i.operands[0]
@@ -362,8 +359,7 @@ def i_CALL(i,fmap):
   op1 = fmap(i.operands[0])
   op1 = op1.signextend(pc.size)
   target = pc+op1 if not i.misc['absolute'] else op1
-  if target._is_ext: target.call(fmap)
-  else: fmap[rip] = target
+  fmap[rip] = target
 
 
 def i_CALLF(i,fmap):
@@ -375,8 +371,7 @@ def i_JMP(i,fmap):
   op1 = fmap(i.operands[0])
   op1 = op1.signextend(pc.size)
   target = pc+op1 if not i.misc['absolute'] else op1
-  if target._is_ext: target.call(fmap)
-  else: fmap[rip] = target
+  fmap[rip] = target
 
 def i_JMPF(i,fmap):
   logger.verbose('%s semantic is not defined'%i.mnemonic)
@@ -434,7 +429,7 @@ def i_INT(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = fmap(i.operands[0])
   push(fmap,fmap[rip])
-  ext('INT%s'%op1).call(fmap)
+  fmap[eip] = ext('INT',port=op1,size=64)
 
 def i_INC(i,fmap):
   op1 = i.operands[0]
@@ -562,7 +557,8 @@ def i_SBB(i,fmap):
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
   a=fmap(op1)
-  x,carry,overflow = SubWithBorrow(a,op2,fmap(cf))
+  c=fmap(cf)
+  x,carry,overflow = SubWithBorrow(a,op2,c)
   fmap[pf]  = parity8(x[0:8])
   fmap[af]  = halfborrow(a,op2,c)
   fmap[zf]  = x==0
@@ -634,6 +630,40 @@ def i_CMP(i,fmap):
   fmap[cf] = carry
   fmap[of] = overflow
   fmap[pf] = parity8(x[0:8])
+
+def i_CMPXCHG(i,fmap):
+  fmap[rip] = fmap[rip]+i.length
+  dst,src = i.operands
+  acc = {8:al,16:ax,32:eax,64:rax}[dst.size]
+  t = fmap(acc==dst)
+  fmap[zf] = tst(t,bit1,bit0)
+  v = fmap(dst)
+  fmap[dst] = tst(t,fmap(src),v)
+  fmap[acc] = v
+
+def i_CMPXCHG8B(i,fmap):
+  fmap[rip] = fmap[rip]+i.length
+  dst = i.operands[0]
+  src = composer([ebx,ecx])
+  acc = composer([eax,edx])
+  t = fmap(acc==dst)
+  fmap[zf] = tst(t,bit1,bit0)
+  v = fmap(dst)
+  fmap[dst] = tst(t,fmap(src),v)
+  fmap[eax] = v[0:32]
+  fmap[edx] = v[32:64]
+
+def i_CMPXCHG16B(i,fmap):
+  fmap[rip] = fmap[rip]+i.length
+  dst = i.operands[0]
+  src = composer([rbx,rcx])
+  acc = composer([rax,rdx])
+  t = fmap(acc==dst)
+  fmap[zf] = tst(t,bit1,bit0)
+  v = fmap(dst)
+  fmap[dst] = tst(t,fmap(src),v)
+  fmap[rax] = v[0:64]
+  fmap[rdx] = v[64:128]
 
 def i_TEST(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -881,17 +911,17 @@ def i_SHLD(i,fmap):
 def i_IMUL(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   if len(i.operands)==1:
-    src = fmap(i.operands[0])
+    src = i.operands[0]
     m,d = {8:(al,ah), 16:(ax,dx), 32:(eax,edx)}[src.size]
-    r = m**src
+    r = fmap(m**src)
   elif len(i.operands)==2:
     dst,src = i.operands
     m = d = dst
-    r = dst**src
+    r = fmap(dst**src)
   else:
     dst,src,imm = i.operands
     m = d = dst
-    r = src**imm.signextend(src.size)
+    r = fmap(src**imm.signextend(src.size))
   lo = r[0:src.size]
   hi = r[src.size:r.size]
   fmap[d]  = hi
@@ -901,9 +931,9 @@ def i_IMUL(i,fmap):
 
 def i_MUL(i,fmap):
   fmap[rip] = fmap[rip]+i.length
-  src = fmap(i.operands[0])
-  m,d = {8:(al,ah), 16:(ax,dx), 32:(eax,edx)}[src.size]
-  r = m**src
+  src = i.operands[0]
+  m,d = {8:(al,ah), 16:(ax,dx), 32:(eax,edx), 64:(rax,rdx)}[src.size]
+  r = fmap(m**src)
   lo = r[0:src.size]
   hi = r[src.size:r.size]
   fmap[d]  = hi

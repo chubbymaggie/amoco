@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
+
 # This code is part of Amoco
-# Copyright (C) 2006-2011 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2006-2011 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 from amoco.system.core import *
@@ -30,7 +32,7 @@ class ELF(CoreExec):
     # for now, the external libs are seen through the elf dynamic section:
     def load_shlib(self):
         for k,f in self.bin._Elf64__dynamic(None).iteritems():
-            self.mmap.write(k,cpu.ext(f))
+            self.mmap.write(k,cpu.ext(f,size=64))
 
     def initenv(self):
         from amoco.cas.mapper import mapper
@@ -40,8 +42,6 @@ class ELF(CoreExec):
             m[k] = v
         return m
 
-    def PC(self):
-        return self.cpu.pc
 
 # LIBC HOOKS DEFINED HERE :
 #----------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from amoco.arch.pic.F46K22.asm import *
 # expose "microarchitecture" (instructions semantics)
 uarch = dict(filter(lambda kv:kv[0].startswith('i_'),locals().iteritems()))
@@ -14,3 +16,6 @@ instruction.set_formatter(PIC_full)
 from amoco.arch.pic.F46K22 import spec_pic18
 
 disassemble = disassembler([spec_pic18])
+
+def PC():
+    return pc

@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 # This code is part of Amoco
-# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 from amoco.system.core import *
@@ -27,9 +27,6 @@ class MSP430(CoreExec):
         for r in self.cpu.R: m[r] = self.cpu.cst(0,16)
         m[self.cpu.pc] = self.cpu.cst(0x4400,16)
         return m
-
-    def PC(self):
-        return self.cpu.pc
 
     # optional codehelper method allows platform-specific analysis of
     # either a (raw) list of instruction, a block/func object (see amoco.code)

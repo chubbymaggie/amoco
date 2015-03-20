@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
+
 # This code is part of Amoco
 # based on elf.py, improving pefile to work out corkami's CoST.exe.
-# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com) 
+# Copyright (C) 2014 Axel Tillequin (bdcht3@gmail.com)
 # published under GPLv2 license
 
 import struct
@@ -562,7 +564,7 @@ class PE(PEcore):
 
     def __init__(self,filename):
         try:
-            f = open(filename,'r')
+            f = open(filename,'rb')
         except (TypeError,IOError):
             f = str(filename)
         data = DataIO(f)
