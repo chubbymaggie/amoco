@@ -22,7 +22,7 @@ class sparc_syntax:
     noprefix = False
 
     comment = pp.Regex(r'\#.*')
-    symbol  = pp.Regex(r'[A-Za-z_.$][A-Za-z0-9_.$]*').setParseAction(lambda r: env.ext(r[0]))
+    symbol  = pp.Regex(r'[A-Za-z_.$][A-Za-z0-9_.$]*').setParseAction(lambda r: env.ext(r[0],size=32))
     mnemo   = pp.LineStart() + symbol + pp.Optional(pp.Literal(',a'))
     mnemo.setParseAction(lambda r: r[0].ref.lower()+''.join(r[1:]))
     integer = pp.Regex(r'[1-9][0-9]*').setParseAction(lambda r: int(r[0],10))
@@ -64,7 +64,8 @@ class sparc_syntax:
 
     def action_reg(toks):
         rname = toks[0]
-        return env.reg(rname.ref)
+        if rname.ref.startswith('asr'): return env.reg(rname.ref)
+        return env.__dict__[rname.ref]
 
     def action_hilo(toks):
         v = toks[1]

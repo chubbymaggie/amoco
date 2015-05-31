@@ -74,14 +74,14 @@ class PE(CoreExec):
             if i.mnemonic.startswith('RET'):
                 i.misc[tag.FUNC_END]=1
                 continue
-            elif i.mnemonic == 'PUSH':
+            elif i.mnemonic in ('PUSH','ENTER'):
                 i.misc[tag.FUNC_STACK]=1
-                if i.operands[0] is cpu.rbp:
+                if i.operands and i.operands[0] is cpu.rbp:
                     i.misc[tag.FUNC_START]=1
                     continue
-            elif i.mnemonic == 'POP':
+            elif i.mnemonic in ('POP','LEAVE'):
                 i.misc[tag.FUNC_UNSTACK]=1
-                if i.operands[0] is cpu.rbp:
+                if i.operands and i.operands[0] is cpu.rbp:
                     i.misc[tag.FUNC_END]=1
                     continue
             # provide hints of absolute location from relative offset:
@@ -89,6 +89,10 @@ class PE(CoreExec):
                 if i.mnemonic == 'CALL':
                     i.misc[tag.FUNC_CALL]=1
                     i.misc['retto'] = i.address+i.length
+                else:
+                    i.misc[tag.FUNC_GOTO]=1
+                    if i.mnemonic == 'Jcc':
+                        i.misc['cond'] = i.cond
                 if (i.address is not None) and i.operands[0]._is_cst:
                     v = i.address+i.operands[0].signextend(64)+i.length
                     x = self.check_sym(v)
@@ -112,17 +116,35 @@ class PE(CoreExec):
     def blockhelper(self,block):
         for i in self.seqhelper(block.instr):
             block.misc.update(i.misc)
-        # compute mapper:
-        m = block.map
-        # annotations based on block semantics:
-        sta,sto = block.support
-        if m[cpu.mem(cpu.rbp-8,64)] == cpu.rbp:
-            block.misc[tag.FUNC_START]=1
-        if m[cpu.rip]==cpu.mem(cpu.rsp-8,64):
-            block.misc[tag.FUNC_END]=1
-        if m[cpu.mem(cpu.rsp,64)]==sto:
-            block.misc[tag.FUNC_CALL]=1
+        # delayed computation of block.map:
+        def _helper(block,m):
+            # annotations based on block semantics:
+            sta,sto = block.support
+            if m[cpu.mem(cpu.rbp-8,64)] == cpu.rbp:
+                block.misc[tag.FUNC_START]=1
+            if m[cpu.rip]==cpu.mem(cpu.rsp-8,64):
+                block.misc[tag.FUNC_END]=1
+            if m[cpu.mem(cpu.rsp,64)]==sto:
+                block.misc[tag.FUNC_CALL]=1
+        block._helper = _helper
         return block
+
+    def funchelper(self,f):
+        roots = f.cfg.roots()
+        if len(roots)==0:
+            roots = filter(lambda n:n.data.misc[tag.FUNC_START],f.cfg.sV)
+            if len(roots)==0:
+                logger.warning("no entry to function %s found"%f)
+        if len(roots)>1:
+            logger.verbose('multiple entries into function %s ?!'%f)
+        rets = f.cfg.leaves()
+        if len(rets)==0:
+            logger.warning("no exit to function %s found"%f)
+        if len(rets)>1:
+            logger.verbose('multiple exits in function %s'%f)
+        for r in rets:
+            if r.data.misc[tag.FUNC_CALL]: f.misc[tag.FUNC_CALL] += 1
+
 
 # HOOKS DEFINED HERE :
 #----------------------------------------------------------------------------

@@ -19,17 +19,22 @@ from amoco.arch.core   import Bits
 # to reflect the order of write-to-memory instructions.
 # __Mem  : is a memory model where symbolic memory pointers are using
 # individual separated zones.
+# conds  : is the list of conditions that must be True for the mapper
+# csi    : is the optional interface to a "concrete" state
+# to be valid.
 class mapper(object):
     assume_no_aliasing = False
 
-    __slots__ = ['__map','__Mem']
+    __slots__ = ['__map','__Mem','conds', 'csi']
 
     # a mapper is inited with a list of instructions
     # provided by a disassembler
-    def __init__(self,instrlist=None):
+    def __init__(self,instrlist=None,csi=None):
         self.__map = generation()
         self.__map.lastw = 0
         self.__Mem = MemoryMap()
+        self.conds = []
+        self.csi = csi
         icache = []
         # if the __map needs to be inited before executing instructions
         # one solution is to prepend the instrlist with a function dedicated
@@ -47,19 +52,39 @@ class mapper(object):
     def __str__(self):
         return '\n'.join(["%s <- %s"%x for x in self])
 
+    def __getstate__(self):
+        return (self.__map,self.csi)
+    def __setstate__(self,state):
+        self.__map,self.csi = state
+        self.__Mem = MemoryMap()
+        for loc,v in self:
+            if loc._is_ptr: self._Mem_write(loc,v)
+
     # list antecedent locations (used in the mapping)
     def inputs(self):
         return sum(map(locations_of,self.__map.itervalues()),[])
 
     # list image locations (modified in the mapping)
     def outputs(self):
-        return sum(map(locations_of,self.__map.iterkeys()),[])
+        L = []
+        for l in sum(map(locations_of,self.__map.iterkeys()),[]):
+            if l._is_ptr: l = mem(l,self.__map[l].size)
+            L.append(l)
+        return L
+
+    def has(self,loc):
+        for l in self.__map.keys():
+            if loc==l: return True
+        return False
+
+    def history(self,loc):
+        return self.__map._generation__getall(loc)
 
     def rw(self):
         r = filter(lambda x:x._is_mem, self.inputs())
-        w = filter(lambda x:x._is_ptr, self.outputs())
+        w = filter(lambda x:x._is_mem, self.outputs())
         sr = [x.size for x in r]
-        sw = [self.__map[x].size for x in w]
+        sw = [x.size for x in w]
         return (sr,sw)
 
     def clear(self):
@@ -68,6 +93,9 @@ class mapper(object):
 
     def memory(self):
         return self.__Mem
+
+    def generation(self):
+        return self.__map
 
     # compare self with mapper m:
     def __cmp__(self,m):
@@ -81,7 +109,10 @@ class mapper(object):
 
     # get a (plain) register value:
     def R(self,x):
-        return self.__map.get(x,x)
+        if self.csi:
+            return self.__map.get(x,self.csi(x))
+        else:
+            return self.__map.get(x,x)
 
     # get a memory location value (fetch) :
     # k must be mem expressions
@@ -124,8 +155,13 @@ class mapper(object):
         cur = 0
         for p in res:
             plen = len(p)
-            if isinstance(p,str): p = cst(Bits(p[::c._endian],bitorder=1).int(),plen*8)
-            elif not p._is_def: p = mem(a,p.size,disp=cur)
+            if isinstance(p,exp) and not p._is_def:
+                if self.csi:
+                    p = self.csi(mem(a,p.size,disp=cur))
+                else:
+                    p = mem(a,p.size,disp=cur)
+            if isinstance(p,str):
+                p = cst(Bits(p[::exp._endian],bitorder=1).int(),plen*8)
             P.append(p)
             cur += plen
         return composer(P)
@@ -199,13 +235,15 @@ class mapper(object):
     #          edx <- (ecx+1)
     # =>
     # result : eax <- 4
-    # The compose flag indicates whether the resulting mapper contains
-    # all mappings of m or only mappings of self. For example, if
-    # we use compose=True we get instead:
-    # result : eax <- 4
-    #          edx <- (ecx+1)
-    def eval(self,m,compose=False):
-        mm = mapper() if not compose else m.use()
+    def eval(self,m):
+        mm = mapper(csi=self.csi)
+        for c in self.conds:
+            cc = c.eval(m)
+            if cc==1: continue
+            if cc==0:
+                logger.error("invalid mapper eval: cond %s is false"%c)
+                raise ValueError
+            mm.conds.append(cc)
         for loc,v in self:
             if loc._is_ptr:
                 loc = m(loc)
@@ -215,7 +253,20 @@ class mapper(object):
     # composition operator returns a new mapper
     # corresponding to function x -> self(m(x))
     def rcompose(self,m):
-        return self.eval(m,compose=True)
+        mcopy = m.use()
+        for c in self.conds:
+            cc = c.eval(m)
+            if cc==1: continue
+            if cc==0:
+                logger.error("invalid mapper eval: cond %s is false"%c)
+                raise ValueError
+            mcopy.conds.append(cc)
+        mm = mcopy.use()
+        for loc,v in self:
+            if loc._is_ptr:
+                loc = mcopy(loc)
+            mm[loc] = mcopy(v)
+        return mm
 
     # self << m : composition (self(m))
     def __lshift__(self,m):
@@ -234,7 +285,7 @@ class mapper(object):
     # sizes for all arguments.
     # if kargs is empty, a copy of the result is just a copy of current mapper.
     def use(self,*args,**kargs):
-        m = mapper()
+        m = mapper(csi=self.csi)
         for loc,v in args:
             m[loc] = v
         if len(kargs)>0:
@@ -242,3 +293,51 @@ class mapper(object):
             for k,v in kargs.iteritems():
                 m[reg(k,argsz)] = cst(v,argsz)
         return self.eval(m)
+
+    # attach/apply conditions to the output mapper
+    def assume(self,conds):
+        m = mapper(csi=self.csi)
+        if conds is None: conds=[]
+        for c in conds:
+            if not c._is_eqn: continue
+            if c.op.symbol == '==' and c.r._is_cst:
+                if c.l._is_reg:
+                    m[c.l] = c.r
+        m.conds = conds
+        mm = self.eval(m)
+        mm.conds += conds
+        return mm
+
+from amoco.cas.smt import *
+
+# union of two mappers:
+def merge(m1,m2):
+    m1 = m1.assume(m1.conds)
+    m2 = m2.assume(m2.conds)
+    mm = mapper()
+    for loc,v1 in m1:
+        if loc._is_ptr:
+            v2 = m2[mem(loc,v1.size)]
+        else:
+            v2 = m2[loc]
+        vv = vec([v1,v2]).simplify()
+        mm[loc] = vv
+    for loc,v2 in m2:
+        if mm.has(loc): continue
+        if loc._is_ptr:
+            v1 = m1[mem(loc,v2.size)]
+        else:
+            v1 = m1[loc]
+        vv = vec([v1,v2]).simplify()
+        mm[loc] = vv
+    return mm
+
+def widening(m):
+    w = False
+    for loc,v in m:
+        if loc._is_reg: v = v[0:loc.size]
+        if v._is_vec and len(v.l)>2:
+            w = True
+            v.w = w
+    return w
+
