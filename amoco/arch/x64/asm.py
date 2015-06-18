@@ -431,7 +431,7 @@ def i_INT(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = fmap(i.operands[0])
   push(fmap,fmap[rip])
-  fmap[eip] = ext('INT',port=op1,size=64)
+  fmap[rip] = ext('INT',port=op1,size=64)
 
 def i_INC(i,fmap):
   op1 = i.operands[0]
@@ -914,7 +914,7 @@ def i_IMUL(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   if len(i.operands)==1:
     src = i.operands[0]
-    m,d = {8:(al,ah), 16:(ax,dx), 32:(eax,edx)}[src.size]
+    m,d = {8:(al,ah), 16:(ax,dx), 32:(eax,edx), 64:(rax,rdx)}[src.size]
     r = fmap(m**src)
   elif len(i.operands)==2:
     dst,src = i.operands
