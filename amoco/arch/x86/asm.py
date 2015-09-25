@@ -17,8 +17,9 @@ def push(fmap,x):
   fmap[mem(esp,x.size)] = x
 
 def pop(fmap,l):
-  fmap[l] = fmap(mem(esp,l.size))
+  v = fmap(mem(esp,l.size))
   fmap[esp] = fmap(esp+l.length)
+  fmap[l] = v
 
 def parity(x):
   x = x ^ (x>>1)
@@ -300,7 +301,7 @@ def i_CMPSD(i,fmap):
 #------------------------------------------------------------------------------
 def _scas_(i,fmap,l):
   counter = cx if i.misc['adrsz'] else ecx
-  a = {1:al, 2:ax, 4:eax}[l]
+  a = fmap({1:al, 2:ax, 4:eax}[l])
   src = fmap(mem(edi,l*8))
   x, carry, overflow = SubWithBorrow(a,src)
   if i.misc['rep']:
@@ -353,7 +354,7 @@ def i_LODSD(i,fmap):
 #------------------------------------------------------------------------------
 def _stos_(i,fmap,l):
   counter = cx if i.misc['adrsz'] else ecx
-  src = {1:al, 2:ax, 4:eax}[l]
+  src = fmap({1:al, 2:ax, 4:eax}[l])
   loc = mem(edi,l*8)
   if i.misc['rep']:
       fmap[loc] = tst(fmap(counter)==0, fmap(loc), src)
@@ -446,13 +447,14 @@ def i_JMPF(i,fmap):
 
 #------------------------------------------------------------------------------
 def _loop_(i,fmap,cond):
+  pc = fmap[eip]+i.length
   opdsz = 16 if i.misc['opdsz'] else 32
   src = i.operands[0].signextend(32)
-  loc = fmap[eip]+src
+  loc = pc+src
   loc = loc[0:opdsz].zeroextend(32)
   counter = cx if i.misc['adrsz'] else ecx
   fmap[counter] = fmap(counter)-1
-  fmap[eip] = tst(fmap(cond), loc, fmap[eip]+i.length)
+  fmap[eip] = tst(fmap(cond), loc, pc)
 
 def i_LOOP(i,fmap):
   counter = cx if i.misc['adrsz'] else ecx
@@ -486,6 +488,24 @@ def i_Jcc(i,fmap):
   op1 = op1.signextend(eip.size)
   cond = i.cond[1]
   fmap[eip] = tst(fmap(cond),fmap[eip]+op1,fmap[eip])
+
+def i_JECXZ(i,fmap):
+  pc = fmap[eip]+i.length
+  fmap[eip] = pc
+  op1 = fmap(i.operands[0])
+  op1 = op1.signextend(pc.size)
+  cond = (ecx==0)
+  target = tst(fmap(cond),fmap[eip]+op1,fmap[eip])
+  fmap[eip] = target
+
+def i_JCXZ(i,fmap):
+  pc = fmap[eip]+i.length
+  fmap[eip] = pc
+  op1 = fmap(i.operands[0])
+  op1 = op1.signextend(pc.size)
+  cond = (cx==0)
+  target = tst(fmap(cond),fmap[eip]+op1,fmap[eip])
+  fmap[eip] = target
 
 def i_RETN(i,fmap):
   src = i.operands[0].v

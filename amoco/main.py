@@ -97,15 +97,16 @@ class lsweep(object):
             n = self.G.add_vertex(n)
             b = n.data
             # find its links:
-            if b.misc['func_call']:
+            if b.misc[code.tag.FUNC_CALL]:
                 aret = b.misc['retto']+0
                 nret = D.get(aret,None) or self.G.get_with_address(aret)
                 if nret is not None:
                     e = cfg.link(n,nret)
                     self.G.add_edge(e)
                     ato  = b.misc['to']
-                    if ato is not 0: C[ato+0].append((e,'func_call'))
-            elif b.misc['func_goto'] and b.misc['to'] is not 0:
+                    if ato is not 0 and b.misc[code.tag.FUNC_CALL]>0:
+                        C[ato+0].append((e,code.tag.FUNC_CALL))
+            elif b.misc[code.tag.FUNC_GOTO] and b.misc['to'] is not 0:
                 ato = b.misc['to']+0
                 nto = D.get(ato,None) or self.G.get_with_address(ato)
                 if nto is not None:
@@ -128,7 +129,7 @@ class lsweep(object):
             n = cfg.node(next(self.iterblocks(ato)))
             n = self.G.add_vertex(n)
             for (p,why) in L:
-                if why is 'func_call':
+                if why is code.tag.FUNC_CALL:
                     if n.data.misc['callers']:
                         n.data.misc['callers'].append(p)
                     else:
@@ -186,6 +187,11 @@ class _target(object):
 
     def __eq__(self,t):
         return (self.cst==t.cst and self.parent==t.parent)
+
+    def __repr__(self):
+        pfx = 'dirty ' if self.dirty else ''
+        cnd = [str(x) for x in self.econd]
+        return '<%s_target %s by %s %s>'%(pfx,self.cst,self.parent.name, cnd)
 
 
 # -----------------------------------------------------------------------------
@@ -262,11 +268,13 @@ class fforward(lsweep):
             return True
         return False
 
-    def getcfg(self,loc=None):
+    def getcfg(self,loc=None,debug=False):
+        if debug: import pdb
         try:
-            for x in self.itercfg(loc): pass
+            for x in self.itercfg(loc):
+                if debug: pdb.set_trace()
         except KeyboardInterrupt:
-            pass
+            if debug: pdb.set_trace()
         return self.G
 
     # generic 'forward' analysis explorer.
@@ -295,7 +303,7 @@ class fforward(lsweep):
                 # otherwise we add the new (parent,vtx) edge.
                 if parent is None:
                     self.add_root_node(vtx)
-                elif parent.data.misc[code.tag.FUNC_CALL]:
+                elif parent.data.misc[code.tag.FUNC_CALL]>0:
                     vtx = self.add_call_node(vtx,parent,econd)
                 else:
                     e = cfg.link(parent,vtx,data=econd)
@@ -384,7 +392,7 @@ class fbackward(lforward):
 
 # -----------------------------------------------------------------------------
 # link backward based analysis:
-# a generalisation of link forward where pc is evaluated by evaluating all paths
+# a generalisation of link forward where pc is evaluated by considering all paths
 # that link to the current node.
 class lbackward(fforward):
     policy = {'depth-first': False, 'branch-lazy': False, 'frame-aliasing':False}
@@ -433,11 +441,17 @@ class lbackward(fforward):
             if x in (s.parent for s in self.spool):
                 code.mapper.assume_no_aliasing = alf
                 return xpc
-        # f is now fully explored so we can "return" to callers:
-        logger.info('lbackward: function %s done'%f)
         # cleanup spool:
         for t in self.spool:
-            if t.parent.c is f.cfg: t.dirty=True
+            if t.parent.c is f.cfg:
+                if t.cst in [n.data.address for n in t.parent.N(+1)]:
+                    t.dirty=True
+                else:
+                    # the target in spool will create a new branch/leaf
+                    # so we're not done yet...
+                    return xpc
+        # f is now fully explored so we can "return" to callers:
+        logger.info('lbackward: function %s done'%f)
         # if needed compute the full map:
         if f.misc['partial']: m = f.makemap()
         f.map = m

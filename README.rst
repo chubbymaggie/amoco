@@ -1,6 +1,10 @@
 =====
 Amoco
 =====
+
+.. image:: https://travis-ci.org/bdcht/amoco.svg?branch=release
+    :target: https://travis-ci.org/bdcht/amoco
+
 +-----------+-----------------------------------+
 | Status:   | Under Development                 |
 +-----------+-----------------------------------+
@@ -88,7 +92,7 @@ Amoco is tested on python 2.7 and depends on the following python packages:
 - grandalf_ used for building CFG (and eventually rendering it)
 - crysp_    used by the generic intruction decoder (``arch/core.py``)
 - z3_       used to simplify expressions and solve constraints
-- pygments_ (not in current release, planned for 2.4.2 release)
+- pygments_ used for pretty printing of assembly code and expressions
 - pyparsing_ for parsing instruction decoder formats
 - ply_ (optional), for parsing *GNU as* files
 - zodb_ (optional), provides persistence of amoco objects in a database
@@ -102,7 +106,7 @@ Below is a very simple example where basic blocks are build with linear sweep:
 .. sourcecode:: python
 
  >>> import amoco
- >>> p = amoco.system.loader.load_program('tests/samples/flow.elf')
+ >>> p = amoco.system.loader.load_program('tests/samples/x86/flow.elf')
  amoco.system.loader: INFO: Elf32 file detected
  amoco.system.loader: INFO: linux_x86 program created
  >>> p
@@ -297,7 +301,7 @@ Let's have a look at the graph instance:
  1.| <node [0x8048370] at 0x8db740c>
  >>> print G.C[0].sE
  0.| <link [0x8048380 -> 0x8048370] at 0x8db742c>
- >>> G.get_node('0x8048370')
+ >>> G.get_by_name('0x8048370')
  <node [0x8048370] at 0x8db740c>
  >>> n=_
  >>> print n.data
@@ -343,7 +347,7 @@ A little more elaborated analysis like **link-forward** would have started analy
  ------
  0.| <node [0x80484d4] at 0x8a38a1c>
  ------
- >>> print G.get_node('0x8048434').data
+ >>> print G.get_by_name('0x8048434').data
  # --- block 0x8048434 ---
  0x8048434  '55'                   push        ebp
  0x8048435  '89e5'                 mov         ebp,esp
@@ -357,7 +361,7 @@ A little more elaborated analysis like **link-forward** would have started analy
  0x8048453  '8b45f4'               mov         eax,[ebp-12]
  0x8048456  '890424'               mov         [esp],eax
  0x8048459  'e825000000'           call        *#fct_b
- >>> print G.get_node('0x8048483').data
+ >>> print G.get_by_name('0x8048483').data
  # --- block 0x8048483 ---
  0x8048483  '55'         push        ebp
  0x8048484  '89e5'       mov         ebp,esp
@@ -1268,7 +1272,7 @@ a function's control-flow graph  (a *graph_core* object).
 The ``graph.add_vertex`` extends Graph.add_vertex to detect that the node to be added *cuts*
 an existing node and adjust the graph structure accordingly.
 The ``graph.spool()`` method provides a list of the current leaves in the graph.
-The ``graph.get_node(name)`` method allows to get a node object by its name.
+The ``graph.get_by_name(name)`` method allows to get a node object by its name.
 
 system
 ------
@@ -1333,6 +1337,20 @@ Please see `LICENSE`_.
 
 Changelog
 =========
+
+- `v2.4.2`_
+
+  * merge support for pygments pretty printing methods (in ui.render module)
+  * add x86 hilighted syntax formatter (in arch.x86.formats)
+  * expose expression's pretty printing interface (exp.pp(), exp.toks())
+  * remove default config class fallback (ConfigParser is standard)
+  * merge some samples and tests ported to pytest package
+  * use setuptools, add tox.ini and travis-ci config
+  * fix some x86/x64 semantics
+  * improve sparc v8 formats
+  * add sparc coprocessor registers
+  * update README
+
 
 - `v2.4.1`_
 
@@ -1412,6 +1430,7 @@ Changelog
 .. _ply: http://www.dabeaz.com/ply/
 .. _zodb: http://www.zodb.org
 .. _LICENSE: https://github.com/bdcht/amoco/blob/release/LICENSE
+.. _v2.4.2: https://github.com/bdcht/amoco/releases/tag/v2.4.2
 .. _v2.4.1: https://github.com/bdcht/amoco/releases/tag/v2.4.1
 .. _v2.4.0: https://github.com/bdcht/amoco/releases/tag/v2.4.0
 .. _v2.3.5: https://github.com/bdcht/amoco/releases/tag/v2.3.5

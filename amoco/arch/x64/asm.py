@@ -17,8 +17,9 @@ def push(fmap,x):
   fmap[mem(rsp,x.size)] = x
 
 def pop(fmap,l):
-  fmap[l] = fmap(mem(rsp,l.size))
+  v = fmap(mem(rsp,l.size))
   fmap[rsp] = fmap(rsp+l.length)
+  fmap[l] = v
 
 def parity(x):
   x = x.zeroextend(64)
@@ -42,6 +43,13 @@ def halfborrow(x,y,c=None):
     s,carry,o = SubWithBorrow(x[0:4],y[0:4],c)
     return carry
 
+# see Intel doc vol.1 §3.4.1.1 about 32-bits operands.
+def _r32_zx64(op1,x):
+    if op1.size==32 and op1._is_reg:
+        return (op1.x,x.zeroextend(64))
+    else:
+        return (op1,x)
+
 #------------------------------------------------------------------------------
 def i_BSWAP(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -57,6 +65,8 @@ def i_BSWAP(i,fmap):
       fmap[dst[48:56]] = _t[8 :16]
       fmap[dst[56:64]] = _t[0 : 8]
   else:
+      dst,_t = _r32_zx64(dst,_t)
+      fmap[dst] = _t
       fmap[dst[0 : 8]] = _t[24:32]
       fmap[dst[8 :16]] = _t[16:24]
       fmap[dst[16:24]] = _t[8 :16]
@@ -150,7 +160,7 @@ def i_CBW(i,fmap):
 
 def i_CWDE(i,fmap):
   fmap[rip] = fmap[rip]+i.length
-  fmap[eax] = fmap(ax).signextend(32)
+  fmap[rax] = fmap(ax).signextend(32).zeroextend(64)
 
 def i_CDQE(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -165,8 +175,8 @@ def i_CWD(i,fmap):
 def i_CDQ(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   x = fmap(eax).signextend(64)
-  fmap[edx] = x[32:64]
-  fmap[eax] = x[0:32]
+  fmap[rdx] = x[32:64].zeroextend(64)
+  fmap[rax] = x[0:32].zeroextend(64)
 
 def i_CQO(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -219,7 +229,7 @@ def i_CMPSQ(i,fmap):
 
 #------------------------------------------------------------------------------
 def _scas_(i,fmap,l):
-  counter,d = ecx,edi if i.misc['adrsz'] else rcx,rdi
+  counter,d = (ecx,edi) if i.misc['adrsz'] else (rcx,rdi)
   a = fmap({1:al, 2:ax, 4:eax, 8:rax}[l])
   src = fmap(mem(d,l*8))
   x, carry, overflow = SubWithBorrow(a,src)
@@ -332,7 +342,9 @@ def i_IN(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = i.operands[0]
   op2 = fmap(i.operands[1])
-  fmap[op1] = ext('IN%s'%op2,op1.size).call(fmap)
+  x = ext('IN%s'%op2,op1.size).call(fmap)
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_OUT(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -380,9 +392,10 @@ def i_JMPF(i,fmap):
 
 #------------------------------------------------------------------------------
 def _loop_(i,fmap,cond):
+  pc = fmap[rip]+i.length
   opdsz = 16 if i.misc['opdsz'] else 64
   src = i.operands[0].signextend(64)
-  loc = fmap[rip]+src
+  loc = pc+src
   loc = loc[0:opdsz].zeroextend(64)
   counter = cx if i.misc['adrsz'] else ecx
   REX = i.misc['REX']
@@ -390,7 +403,7 @@ def _loop_(i,fmap,cond):
   if REX: W=REX[0]
   if W==1: counter = rcx
   fmap[counter] = fmap(counter)-1
-  fmap[rip] = tst(fmap(cond), loc, fmap[rip]+i.length)
+  fmap[rip] = tst(fmap(cond), loc, pc)
 
 def i_LOOP(i,fmap):
   cond = (counter!=0)
@@ -422,6 +435,24 @@ def i_Jcc(i,fmap):
   cond = i.cond[1]
   fmap[rip] = tst(fmap(cond),fmap[rip]+op1,fmap[rip])
 
+def i_JRCXZ(i,fmap):
+  pc = fmap[rip]+i.length
+  fmap[rip] = pc
+  op1 = fmap(i.operands[0])
+  op1 = op1.signextend(pc.size)
+  cond = (rcx==0)
+  target = tst(fmap(cond),fmap[rip]+op1,fmap[rip])
+  fmap[rip] = target
+
+def i_JECXZ(i,fmap):
+  pc = fmap[rip]+i.length
+  fmap[rip] = pc
+  op1 = fmap(i.operands[0])
+  op1 = op1.signextend(pc.size)
+  cond = (ecx==0)
+  target = tst(fmap(cond),fmap[rip]+op1,fmap[rip])
+  fmap[rip] = target
+
 def i_RETN(i,fmap):
   src = i.operands[0].v
   pop(fmap,rip)
@@ -445,6 +476,7 @@ def i_INC(i,fmap):
   fmap[zf] = x==0
   fmap[sf] = x<0
   fmap[of] = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_DEC(i,fmap):
@@ -459,6 +491,7 @@ def i_DEC(i,fmap):
   fmap[zf] = x==0
   fmap[sf] = x<0
   fmap[of] = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_NEG(i,fmap):
@@ -473,22 +506,28 @@ def i_NEG(i,fmap):
   fmap[zf] = x==0
   fmap[sf] = x<0
   fmap[of] = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_NOT(i,fmap):
   op1 = i.operands[0]
   fmap[rip] = fmap[rip]+i.length
-  fmap[op1] = ~fmap(op1)
+  x = ~fmap(op1)
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_SETcc(i,fmap):
   op1 = fmap(i.operands[0])
   fmap[rip] = fmap[rip]+i.length
-  fmap[op1] = tst(fmap(i.cond[1]),cst(1,op1.size),cst(0,op1.size))
+  x = tst(fmap(i.cond[1]),cst(1,op1.size),cst(0,op1.size))
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_MOV(i,fmap):
   op1 = i.operands[0]
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
+  op1,op2 = _r32_zx64(op1,op2)
   fmap[op1] = op2
 
 def i_MOVBE(i,fmap):
@@ -512,7 +551,9 @@ def i_MOVSX(i,fmap):
   op1 = i.operands[0]
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
-  fmap[op1] = op2.signextend(op1.size)
+  x = op2.signextend(op1.size)
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_MOVSXD(i,fmap):
   op1 = i.operands[0]
@@ -524,20 +565,24 @@ def i_MOVZX(i,fmap):
   op1 = i.operands[0]
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
-  fmap[op1] = op2.zeroextend(op1.size)
+  x = op2.zeroextend(op1.size)
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_ADC(i,fmap):
   op1 = i.operands[0]
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
   a=fmap(op1)
-  x,carry,overflow = AddWithCarry(a,op2,fmap(cf))
+  c = fmap(cf)
+  x,carry,overflow = AddWithCarry(a,op2,c)
   fmap[pf]  = parity8(x[0:8])
   fmap[af]  = halfcarry(a,op2,c)
   fmap[zf]  = x==0
   fmap[sf]  = x<0
   fmap[cf]  = carry
   fmap[of]  = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_ADD(i,fmap):
@@ -552,6 +597,7 @@ def i_ADD(i,fmap):
   fmap[sf]  = x<0
   fmap[cf]  = carry
   fmap[of]  = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_SBB(i,fmap):
@@ -567,6 +613,7 @@ def i_SBB(i,fmap):
   fmap[sf]  = x<0
   fmap[cf]  = carry
   fmap[of]  = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_SUB(i,fmap):
@@ -581,6 +628,7 @@ def i_SUB(i,fmap):
   fmap[sf]  = x<0
   fmap[cf]  = carry
   fmap[of]  = overflow
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_AND(i,fmap):
@@ -595,6 +643,7 @@ def i_AND(i,fmap):
   fmap[cf] = bit0
   fmap[of] = bit0
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_OR(i,fmap):
@@ -607,6 +656,7 @@ def i_OR(i,fmap):
   fmap[cf] = bit0
   fmap[of] = bit0
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_XOR(i,fmap):
@@ -619,6 +669,7 @@ def i_XOR(i,fmap):
   fmap[cf] = bit0
   fmap[of] = bit0
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_CMP(i,fmap):
@@ -639,9 +690,16 @@ def i_CMPXCHG(i,fmap):
   acc = {8:al,16:ax,32:eax,64:rax}[dst.size]
   t = fmap(acc==dst)
   fmap[zf] = tst(t,bit1,bit0)
-  v = fmap(dst)
-  fmap[dst] = tst(t,fmap(src),v)
-  fmap[acc] = v
+  if dst.size==32 and dst._is_reg:
+      x = fmap(src).zeroextend(64)
+      v = fmap(dst).zeroextend(64)
+      dst = dst.x
+      acc = rax
+  else:
+      x = fmap(src)
+      v = fmap(dst)
+  fmap[dst] = tst(t,x,fmap(dst))
+  fmap[acc] = tst(t,fmap(acc),v)
 
 def i_CMPXCHG8B(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -652,8 +710,8 @@ def i_CMPXCHG8B(i,fmap):
   fmap[zf] = tst(t,bit1,bit0)
   v = fmap(dst)
   fmap[dst] = tst(t,fmap(src),v)
-  fmap[eax] = v[0:32]
-  fmap[edx] = v[32:64]
+  fmap[rax] = tst(t,fmap(rax),v[0:32].zeroextend(64))
+  fmap[rdx] = tst(t,fmap(rdx),v[32:64].zeroextend(64))
 
 def i_CMPXCHG16B(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -691,9 +749,12 @@ def i_XCHG(i,fmap):
   fmap[rip] = fmap[rip]+i.length
   op1 = i.operands[0]
   op2 = i.operands[1]
-  tmp = fmap(op1)
-  fmap[op1] = fmap(op2)
-  fmap[op2] = tmp
+  tmp1 = fmap(op1)
+  tmp2 = fmap(op2)
+  op1,tmp2 = _r32_zx64(op1,tmp2)
+  fmap[op1] = tmp2
+  op2,tmp1 = _r32_zx64(op2,tmp1)
+  fmap[op2] = tmp1
 
 def i_SHR(i,fmap):
   REX = i.misc['REX']
@@ -718,10 +779,11 @@ def i_SHR(i,fmap):
     fmap[cf] = top(1)
     fmap[of] = top(1)
   res = a>>count
-  fmap[op1] = res
   fmap[sf] = (res<0)
   fmap[zf] = (res==0)
   fmap[pf] = parity8(res[0:8])
+  op1,res = _r32_zx64(op1,res)
+  fmap[op1] = res
 
 def i_SAR(i,fmap):
   REX = i.misc['REX']
@@ -746,11 +808,11 @@ def i_SAR(i,fmap):
     fmap[cf] = top(1)
     fmap[of] = top(1)
   res = a//count  # (// is used as arithmetic shift in cas.py)
-  fmap[op1] = res
   fmap[sf] = (res<0)
   fmap[zf] = (res==0)
   fmap[pf] = parity8(res[0:8])
-
+  op1,res = _r32_zx64(op1,res)
+  fmap[op1] = res
 
 def i_SHL(i,fmap):
   REX = i.misc['REX']
@@ -775,10 +837,11 @@ def i_SHL(i,fmap):
   else:
     fmap[cf] = top(1)
     fmap[of] = top(1)
-  fmap[op1] = x
   fmap[sf] = (x<0)
   fmap[zf] = (x==0)
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 i_SAL = i_SHL
 
@@ -803,6 +866,7 @@ def i_ROL(i,fmap):
   else:
     fmap[cf] = top(1)
     fmap[of] = top(1)
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_ROR(i,fmap):
@@ -826,6 +890,7 @@ def i_ROR(i,fmap):
   else:
     fmap[cf] = top(1)
     fmap[of] = top(1)
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_RCL(i,fmap):
@@ -850,6 +915,7 @@ def i_RCL(i,fmap):
   else:
     fmap[cf] = top(1)
     fmap[of] = top(1)
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_RCR(i,fmap):
@@ -874,6 +940,7 @@ def i_RCR(i,fmap):
     fmap[cf] = top(1)
     fmap[of] = top(1)
   fmap[cf] = carry
+  op1,x = _r32_zx64(op1,x)
   fmap[op1] = x
 
 def i_CMOVcc(i,fmap):
@@ -881,7 +948,9 @@ def i_CMOVcc(i,fmap):
   op2 = fmap(i.operands[1])
   fmap[rip] = fmap[rip]+i.length
   a = fmap(op1)
-  fmap[op1] = tst(fmap(i.cond[1]),op2,a)
+  x = tst(fmap(i.cond[1]),op2,a)
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_SHRD(i,fmap):
   op1 = i.operands[0]
@@ -892,10 +961,11 @@ def i_SHRD(i,fmap):
   n = op3.value
   r = op1.size-n
   x = (fmap(op1)>>n) | (op2<<r)
-  fmap[op1] = x
   fmap[sf] = (x<0)
   fmap[zf] = (x==0)
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_SHLD(i,fmap):
   op1 = i.operands[0]
@@ -905,10 +975,11 @@ def i_SHLD(i,fmap):
   n = op3.value
   r = op1.size-n
   x = (fmap(op1)<<n) | (op2>>r)
-  fmap[op1] = x
   fmap[sf] = (x<0)
   fmap[zf] = (x==0)
   fmap[pf] = parity8(x[0:8])
+  op1,x = _r32_zx64(op1,x)
+  fmap[op1] = x
 
 def i_IMUL(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -926,10 +997,12 @@ def i_IMUL(i,fmap):
     r = fmap(src**imm.signextend(src.size))
   lo = r[0:src.size]
   hi = r[src.size:r.size]
-  fmap[d]  = hi
-  fmap[m]  = lo
   fmap[cf] = hi!=(lo>>31)
   fmap[of] = hi!=(lo>>31)
+  d,hi = _r32_zx64(d,hi)
+  fmap[d]  = hi
+  m,lo = _r32_zx64(m,lo)
+  fmap[m]  = lo
 
 def i_MUL(i,fmap):
   fmap[rip] = fmap[rip]+i.length
@@ -938,10 +1011,12 @@ def i_MUL(i,fmap):
   r = fmap(m**src)
   lo = r[0:src.size]
   hi = r[src.size:r.size]
-  fmap[d]  = hi
-  fmap[m]  = lo
   fmap[cf] = hi!=0
   fmap[of] = hi!=0
+  d,hi = _r32_zx64(d,hi)
+  fmap[d]  = hi
+  m,lo = _r32_zx64(m,lo)
+  fmap[m]  = lo
 
 def i_RDRAND(i,fmap):
    fmap[rip] = fmap[rip]+i.length
@@ -1155,15 +1230,26 @@ def i_RSM(i,fmap):
 
 def i_SYSENTER(i,fmap):
   logger.verbose('%s semantic is not defined'%i.mnemonic)
-  fmap[rip] = top(32)
-  fmap[rsp] = top(32)
+  fmap[rip] = top(64)
+  fmap[rsp] = top(64)
   fmap[cs]  = top(16)
   fmap[ss]  = top(16)
 
 def i_SYSEXIT(i,fmap):
   logger.verbose('%s semantic is not defined'%i.mnemonic)
-  fmap[rip] = top(32)
-  fmap[rsp] = top(32)
+  fmap[rip] = top(64)
+  fmap[rsp] = top(64)
   fmap[cs]  = top(16)
   fmap[ss]  = top(16)
+
+def i_SYSCALL(i,fmap):
+  logger.verbose('%s semantic is not defined'%i.mnemonic)
+  fmap[rip] = top(64)
+  fmap[rcx] = top(64)
+  fmap[r11] = top(64)
+
+def i_SYSRET(i,fmap):
+  logger.verbose('%s semantic is not defined'%i.mnemonic)
+  fmap[rip] = top(64)
+  fmap[rsp] = top(64)
 
