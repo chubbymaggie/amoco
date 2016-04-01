@@ -79,7 +79,6 @@ def ia32_nop(obj):
 @ispec_ia32(" 8>[ {9e}         ]", mnemonic = "SAHF",    type=type_data_processing)
 @ispec_ia32(" 8>[ {9f}         ]", mnemonic = "LAHF",    type=type_data_processing)
 @ispec_ia32(" 8>[ {d7}         ]", mnemonic = "XLATB",   type=type_data_processing)
-@ispec_ia32(" 8>[ {6d}         ]", mnemonic = "IRETD",   type=type_other)
 @ispec_ia32(" 8>[ {61}         ]", mnemonic = "POPAD",   type=type_other)
 @ispec_ia32(" 8>[ {9d}         ]", mnemonic = "POPFD",   type=type_other)
 @ispec_ia32(" 8>[ {60}         ]", mnemonic = "PUSHAD",  type=type_other)
@@ -103,12 +102,14 @@ def ia32_nop(obj):
 def ia32_nooperand(obj):
     pass
 
+@ispec_ia32(" 8>[ {cf}         ]", mnemonic = "IRETD",   type=type_other)
 @ispec_ia32(" 8>[ {98}         ]", mnemonic = "CWDE",    type=type_data_processing)
 @ispec_ia32(" 8>[ {99}         ]", mnemonic = "CDQ",     type=type_data_processing)
 def ia32_nooperand(obj):
     if obj.misc['opdsz']:
         if obj.mnemonic=="CWDE": obj.mnemonic="CBW"
         if obj.mnemonic=="CDQ" : obj.mnemonic="CWD"
+        if obj.mnemonic=="IRETD" : obj.mnemonic="IRET"
 
 # instructions for which REP/REPNE is valid (see formats.py):
 @ispec_ia32(" 8>[ {6c} ]", mnemonic = "INSB",    type=type_system)
@@ -135,19 +136,27 @@ def ia32_strings(obj):
 # imm8:
 @ispec_ia32("16>[ {d5} ib(8) ]", mnemonic = "AAD",    type=type_data_processing)
 @ispec_ia32("16>[ {d4} ib(8) ]", mnemonic = "AAM",    type=type_data_processing)
-@ispec_ia32("16>[ {6a} ib(8) ]", mnemonic = "PUSH",   type=type_data_processing)
 @ispec_ia32("16>[ {cd} ib(8) ]", mnemonic = "INT",    type=type_control_flow)
+def ia32_imm8(obj,ib):
+    obj.operands = [env.cst(ib,8)]
+
+@ispec_ia32("16>[ {6a} ib(8) ]", mnemonic = "PUSH",   type=type_data_processing)
+def ia32_imm8_signed(obj,ib):
+    obj.operands = [env.cst(ib,8).signextend(8)]
+
 @ispec_ia32("16>[ {eb} ib(8) ]", mnemonic = "JMP",    type=type_control_flow)
 @ispec_ia32("16>[ {e2} ib(8) ]", mnemonic = "LOOP",   type=type_control_flow)
 @ispec_ia32("16>[ {e1} ib(8) ]", mnemonic = "LOOPE",  type=type_control_flow)
 @ispec_ia32("16>[ {e0} ib(8) ]", mnemonic = "LOOPNE", type=type_control_flow)
 def ia32_imm_rel(obj,ib):
-    obj.operands = [env.cst(ib,8)]
+    size = obj.misc['adrsz'] or 32
+    obj.operands = [env.cst(ib,8).signextend(size)]
 
 @ispec_ia32("16>[ {e3} cb(8) ]", mnemonic = "JECXZ", type=type_control_flow)
 def ia32_cb8(obj,cb):
-    if obj.misc['adrsz']==16: obj.mnemonic = "JCXZ"
-    obj.operands = [env.cst(cb,8)]
+    size = obj.misc['adrsz'] or 32
+    if size==16: obj.mnemonic = "JCXZ"
+    obj.operands = [env.cst(cb,8).signextend(size)]
 
 # imm16:
 @ispec_ia32("24>[ {c2} iw(16) ]", mnemonic = "RETN", type=type_control_flow)
@@ -299,6 +308,7 @@ def ia32_imm_rel(obj,cc,cb):
 def ia32_imm_rel(obj,cc,data):
     obj.cond = CONDITION_CODES[cc]
     size = obj.misc['opdsz'] or 32
+    if data.size<size: raise InstructionError(obj)
     imm = data[0:size]
     op1 = env.cst(imm.int(-1),size)
     op1.sf = True
@@ -346,7 +356,6 @@ def ia32_mov_adr(obj,data,_flg8,_inv):
     if seg is None: seg=''
     if data.size<adrsz: raise InstructionError(obj)
     moffs8 = env.cst(data[0:adrsz].int(),adrsz)
-    moffs8.sf = True
     op2 = env.mem(moffs8,opdsz,seg)
     obj.operands = [op1, op2] if not _inv else [op2, op1]
     obj.bytes += pack(data[0:adrsz])
@@ -665,6 +674,24 @@ def ia32_r32_seg(obj,Mod,RM,REG,data,_seg):
     op2 = env.mem(op2.a,op1.size+16,_seg)
     obj.operands = [op1, op2]
     obj.type = type_system
+
+@ispec_ia32("*>[ {0f}{ad} /r ]", mnemonic = "SHRD")
+@ispec_ia32("*>[ {0f}{a5} /r ]", mnemonic = "SHLD")
+def ia32_rm32_op3cl(obj,Mod,RM,REG,data):
+    op1,data = getModRM(obj,Mod,RM,data)
+    op2 = env.getreg(REG,op1.size)
+    obj.operands = [op1, op2, env.cl]
+    obj.type = type_data_processing
+
+@ispec_ia32("*>[ {0f}{ac} /r ]", mnemonic = "SHRD")
+@ispec_ia32("*>[ {0f}{a4} /r ]", mnemonic = "SHLD")
+def ia32_rm32_op3cst(obj,Mod,RM,REG,data):
+    op1,data = getModRM(obj,Mod,RM,data)
+    op2 = env.getreg(REG,op1.size)
+    imm = data[0:8]
+    obj.operands = [op1, op2, env.cst(imm.int(),8)]
+    obj.bytes += pack(imm)
+    obj.type = type_data_processing
 
 # r16/32 , m16&16/32&32
 @ispec_ia32("*>[ {62} /r     ]", mnemonic = "BOUND")
